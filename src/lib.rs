@@ -30,7 +30,7 @@ enum Ip {
 }
 
 /// Do a circular left shift on a width of `HALF_KEY_SIZE`.
-fn circular_left_shift(ci: u64, di: u64, shift_count: i64) -> (u64, u64) {
+fn circular_left_shift(ci: u64, di: u64, shift_count: u8) -> (u64, u64) {
     let mut new_value1 = ci;
     let mut new_value2 = di;
     for _ in 0 .. shift_count {
