@@ -20,7 +20,7 @@
 
 pub type Key = [u8; 8];
 
-const FIRST_BIT:        u64 = 1 << 63;
+const FIRST_BIT:        u32 = 1 << 31;
 const HALF_KEY_SIZE:    i64 = KEY_SIZE / 2;
 const KEY_SIZE:         i64 = 56;
 
@@ -30,16 +30,14 @@ enum Ip {
 }
 
 /// Do a circular left shift on a width of `HALF_KEY_SIZE`.
-fn circular_left_shift(ci: u64, di: u64, shift_count: u8) -> (u64, u64) {
-    let mut new_value1 = ci;
-    let mut new_value2 = di;
+fn circular_left_shift(ci: u32, di: u32, shift_count: u8) -> (u32, u32) {
+    let mut ci_next = ci;
+    let mut di_next = di;
     for _ in 0 .. shift_count {
-        let first_bit = new_value1 & FIRST_BIT;
-        new_value1 = (new_value1 << 1) | (first_bit >> (HALF_KEY_SIZE - 1));
-        let first_bit = new_value2 & FIRST_BIT;
-        new_value2 = (new_value2 << 1) | (first_bit >> (HALF_KEY_SIZE - 1));
+        ci_next = (ci_next << 1) | ((ci_next & FIRST_BIT) >> (HALF_KEY_SIZE - 1));
+        di_next = (di_next << 1) | ((di_next & FIRST_BIT) >> (HALF_KEY_SIZE - 1));
     }
-    (new_value1, new_value2)
+    (ci_next, di_next)
 }
 
 /// Swap bits in `a` using a delta swap.
@@ -99,10 +97,10 @@ fn compute_subkeys(key: u64) -> Vec<u64> {
 
     for shift_count in &table {
         let last_key = *subkeys.last().unwrap();
-        let last_ci = last_key & 0xFFFFFFF000000000;
-        let last_di = last_key << HALF_KEY_SIZE;
+        let last_ci = ((last_key & 0xFFFFFFF000000000) >> 32) as u32;
+        let last_di = (last_key >> 4) as u32;
         let (ci, di) = circular_left_shift(last_ci, last_di, *shift_count);
-        let current_key = ci | (di >> HALF_KEY_SIZE);
+        let current_key = ((ci as u64) << 32) | ((di as u64) << 4);
         subkeys.push(current_key);
     }
 
@@ -168,12 +166,11 @@ fn p(block: u32) -> u32 {
     const BLOCK_SIZE: u8 = 32;
 
     let mut result: u32 = 0;
-
     for m in 0 .. BLOCK_SIZE as usize {
         if P_TABLE[m] > m as u8 {
-            result |= ( block & ( 0x01 << BLOCK_SIZE - P_TABLE[m] ) ) << P_TABLE[m] - m as u8 - 1;
+            result |= (block & (0x01 << BLOCK_SIZE - P_TABLE[m])) << P_TABLE[m] - (m as u8 + 1);
         } else {
-            result |= ( block & ( 0x01 << BLOCK_SIZE - P_TABLE[m] ) ) >> m as u8 - P_TABLE[m] + 1;
+            result |= (block & (0x01 << BLOCK_SIZE - P_TABLE[m])) >> (m as u8 + 1) - P_TABLE[m];
         }
     }
     result
@@ -251,13 +248,13 @@ fn ip(message: u64, dir: Ip) -> u64 {
         0x000000FF000000FF
     ];
     const DELTA: [u8; COUNT] = [ 9, 18, 36, 24, 24];
+
     let mut result: u64 = message;
-    let range = 0 .. COUNT;
     match dir {
-        Ip::Direct  => for i in range {
+        Ip::Direct  => for i in 0 .. COUNT {
             result = delta_swap(result, DELTA[i], MASK[i])
         },
-        Ip::Reverse => for i in range.rev() {
+        Ip::Reverse => for i in (0 .. COUNT).rev() {
             result = delta_swap(result, DELTA[i], MASK[i])
         }
     }
@@ -332,25 +329,34 @@ mod tests {
 
     #[test]
     fn test_e() {
-        let result = e(0b1111_0000_1010_1010_1111_0000_1010_1010);
-        assert_eq!(0b011110_100001_010101_010101_011110_100001_010101_010101u64 << 16, result);
-
-        let result = e(0b1111_0000_1010_1010_1111_0000_1010_1011);
-        assert_eq!(0b111110_100001_010101_010101_011110_100001_010101_010111u64 << 16, result);
-
-        let result = e(0b1111_1111_1111_1111_1111_1111_1111_1111);
-        assert_eq!(0b111111_111111_111111_111111_111111_111111_111111_111111u64 << 16, result);
+        let result: [u64; 3] = [
+            e(0b1111_0000_1010_1010_1111_0000_1010_1010),
+            e(0b1111_0000_1010_1010_1111_0000_1010_1011),
+            e(0b1111_1111_1111_1111_1111_1111_1111_1111),
+        ];
+        let expect: [u64; 3] = [
+            0b011110_100001_010101_010101_011110_100001_010101_010101u64 << 16,
+            0b111110_100001_010101_010101_011110_100001_010101_010111u64 << 16,
+            0b111111_111111_111111_111111_111111_111111_111111_111111u64 << 16,
+        ];
+        for i in 0 .. 3 {
+            assert_eq!(expect[i], result[i]);
+        }
     }
 
     #[test]
     fn test_p() {
-        let result = p(0b1111_0000_0101_1010_1110_0111_1100_0011);
-        let expect =   0b0000_0101_1111_0111_1010_1010_1100_1011;
-        assert_eq!(expect, result);
-
-        let result = p(0b1011_0111_0001_1000_0000_1011_0110_1010);
-        let expect =   0b0101_1100_1011_0010_0110_0110_0101_0010;
-        assert_eq!(expect, result);
+        let result: [u32; 2] = [
+            p(0b1111_0000_0101_1010_1110_0111_1100_0011),
+            p(0b1011_0111_0001_1000_0000_1011_0110_1010),
+        ];
+        let expect: [u32; 2] = [
+            0b0000_0101_1111_0111_1010_1010_1100_1011,
+            0b0101_1100_1011_0010_0110_0110_0101_0010,
+        ];
+        for i in 0 .. 2 {
+            assert_eq!(expect[i], result[i]);
+        }
     }
 
     #[test]
