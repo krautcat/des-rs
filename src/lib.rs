@@ -324,7 +324,6 @@ pub fn decrypt(cipher: &[u8], key: &Key) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{decrypt, encrypt};
-
     use super::{e, p, pc1, pc2};
 
     #[test]
