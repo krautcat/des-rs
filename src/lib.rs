@@ -29,7 +29,7 @@ enum Ip {
     Reverse
 }
 
-/// циклический  сдвиг влево половины ключа
+/// Циклический  сдвиг влево половины ключа
 fn circular_left_shift(ci: u32, di: u32, shift_count: u8) -> (u32, u32) {
     let mut ci_next = ci;
     let mut di_next = di;
@@ -40,7 +40,7 @@ fn circular_left_shift(ci: u32, di: u32, shift_count: u8) -> (u32, u32) {
     (ci_next, di_next)
 }
 
-/// обмен битов с расстоянием delta и маской mask в числе a
+/// Обмен битов с расстоянием delta и маской mask в числе a
 fn delta_swap(a: u64, delta: u8, mask: u64) -> u64 {
     let b = (a ^ (a >> delta)) & mask;
     a ^ b ^ (b << delta)
