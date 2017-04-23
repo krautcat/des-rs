@@ -296,12 +296,10 @@ fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
         let mut li: u32 = ((permuted & 0xFFFFFFFF00000000) >> 32) as u32;
         let mut ri: u32 = ((permuted & 0x00000000FFFFFFFF)) as u32;
 
-        let mut i = 0;
         for subkey in &subkeys {
             let last_li = li;
             li = ri;
             ri = last_li ^ feistel(ri, *subkey);
-            i += 1;
         }
 
         let r16l16 = ( ( ri as u64 ) << 32 ) | li as u64;
