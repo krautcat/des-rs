@@ -5,7 +5,7 @@
 //! # Example
 //!
 //! ```c
-//! extern crate des;
+//! extern crate des_rs_krautcat;
 //!
 //! let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
 //! let message = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
@@ -29,7 +29,7 @@ enum Ip {
     Reverse
 }
 
-/// Do a circular left shift on a width of `HALF_KEY_SIZE`.
+/// циклический  сдвиг влево половины ключа
 fn circular_left_shift(ci: u32, di: u32, shift_count: u8) -> (u32, u32) {
     let mut ci_next = ci;
     let mut di_next = di;
@@ -40,13 +40,13 @@ fn circular_left_shift(ci: u32, di: u32, shift_count: u8) -> (u32, u32) {
     (ci_next, di_next)
 }
 
-/// Swap bits in `a` using a delta swap.
+/// обмен битов с расстоянием delta и маской mask в числе a
 fn delta_swap(a: u64, delta: u8, mask: u64) -> u64 {
     let b = (a ^ (a >> delta)) & mask;
     a ^ b ^ (b << delta)
 }
 
-/// Convert a `Key` to a 64-bits integer.
+/// Конвертирование ключа из массива u8 в одно число типа u64
 fn key_to_u64(key: &Key) -> u64 {
     let mut result = 0;
     for &part in key {
@@ -56,26 +56,24 @@ fn key_to_u64(key: &Key) -> u64 {
     result
 }
 
-/// Convert a message to a vector of 64-bits integer.
+/// Конвертирование сообщения из массива u8 в вектор u64
 fn message_to_u64s(message: &[u8]) -> Vec<u64> {
     message.chunks(8)
-        .map(|m| key_to_u64(&to_key(m)))
+        .map(|m| {
+            let mut result: u64 = 0;
+            for &part in m {
+                result <<= 8;
+                result += part as u64;
+            }
+            if m.len() < 8 {
+                result <<= 8 * (8 - m.len());
+            }
+            result
+        })
         .collect()
 }
 
-/// Convert a slice to a `Key`.
-fn to_key(slice: &[u8]) -> Key {
-    let mut vec: Vec<u8> = slice.iter().cloned().collect();
-    let mut key = [0; 8];
-    let diff = key.len() - vec.len();
-    if diff > 0 {
-        vec.append(&mut vec![0; diff]);
-    }
-    key.clone_from_slice(&vec);
-    key
-}
-
-/// Convert a `u64` to a `Vec<u8>`.
+/// Конвертирование u64 в вектор u8
 fn to_u8_vec(num: u64) -> Vec<u8> {
     vec![
         ((num & 0xFF00000000000000) >> 56) as u8,
@@ -89,7 +87,7 @@ fn to_u8_vec(num: u64) -> Vec<u8> {
     ]
 }
 
-/// Create the 16 subkeys.
+/// Процедура создания 16 подключей
 fn compute_subkeys(key: u64) -> Vec<u64> {
     let table = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1];
     let k0 = pc1(key);
@@ -108,7 +106,7 @@ fn compute_subkeys(key: u64) -> Vec<u64> {
     subkeys.iter().map(|&n| { pc2(n) }).collect()
 }
 
-/// Swap bits using the PC-1 table.
+/// Перестановка согласно таблице PC-1
 fn pc1(key: u64) -> u64 {
     let key = delta_swap(key,  2, 0x3333000033330000);
     let key = delta_swap(key,  4, 0x0F0F0F0F00000000);
@@ -121,23 +119,32 @@ fn pc1(key: u64) -> u64 {
     key & 0xFFFFFFFFFFFFFF00
 }
 
-/// Swap bits using the PC-2 table.
+/// Перестановка согласно таблице PC-2
 fn pc2(key: u64) -> u64 {
-    let key = key.rotate_left(61);
-    let b1 = (key & 0x0021000002000000) >> 7;
-    let b2 = (key & 0x0008020010080000) << 1;
-    let b3 = key & 0x0002200000000000;
-    let b4 = (key & 0x0000000000100020) << 19;
-    let b5 = (key.rotate_left(54) & 0x0005312400000011).wrapping_mul(0x0000000094200201) & 0xea40100880000000;
-    let b6 = (key.rotate_left(7) & 0x0022110000012001).wrapping_mul(0x0001000000610006) & 0x1185004400000000;
-    let b7 = (key.rotate_left(6) & 0x0000520040200002).wrapping_mul(0x00000080000000c1) & 0x0028811000200000;
-    let b8 = (key & 0x01000004c0011100).wrapping_mul(0x0000000000004284) & 0x0400082244400000;
-    let b9 = (key.rotate_left(60) & 0x0000000000820280).wrapping_mul(0x0000000000089001) & 0x0000000110880000;
-    let b10 = (key.rotate_left(49) & 0x0000000000024084).wrapping_mul(0x0000000002040005) & 0x000000000a030000;
-    b1 | b2 | b3 | b4 | b5 | b6 | b7 | b8 | b9 | b10
+    const PC_2_TABLE: [u8; 48] = [
+        14, 17, 11, 24,  1,  5,
+         3, 28, 15,  6, 21, 10,
+        23, 19, 12,  4, 26,  8,
+        16,  7, 27, 20, 13,  2,
+        41, 52, 31, 37, 47, 55,
+        30, 40, 51, 45, 33, 48,
+        44, 49, 39, 56, 34 ,53,
+        46, 42, 50, 36, 29, 32
+    ];
+    const OUT_SIZE: u8 = 64;
+
+    let mut result: u64 = 0;
+    for m in 0 .. PC_2_TABLE.len() as usize {
+        if PC_2_TABLE[m] > m as u8 {
+            result |= (key & (0x01 << OUT_SIZE - PC_2_TABLE[m])) << PC_2_TABLE[m] - (m as u8 + 1);
+        } else {
+            result |= (key & (0x01 << OUT_SIZE - PC_2_TABLE[m])) >> (m as u8 + 1) - PC_2_TABLE[m];
+        }
+    }
+    result & 0xFFFFFFFFFFFF0000
 }
 
-/// Swap bits using the E table.
+/// Перестановка согласно таблице E
 fn e(block: u32) -> u64 {
     const BLOCK_LEN: usize = 32;
     const RESULT_LEN: usize = 48;
@@ -155,7 +162,7 @@ fn e(block: u32) -> u64 {
     b1 | b2 | b3 | b4 | b5 | b6 | b7 | b8 | b9 | b10
 }
 
-/// Swap bits using the P table.
+/// Перестановка согласно таблицек P
 fn p(block: u32) -> u32 {
     const P_TABLE: [u8; 32] = [
         16,  7, 20, 21, 29, 12, 28, 17,
@@ -166,7 +173,7 @@ fn p(block: u32) -> u32 {
     const BLOCK_SIZE: u8 = 32;
 
     let mut result: u32 = 0;
-    for m in 0 .. BLOCK_SIZE as usize {
+    for m in 0 .. P_TABLE.len() as usize {
         if P_TABLE[m] > m as u8 {
             result |= (block & (0x01 << BLOCK_SIZE - P_TABLE[m])) << P_TABLE[m] - (m as u8 + 1);
         } else {
@@ -176,7 +183,7 @@ fn p(block: u32) -> u32 {
     result
 }
 
-/// Produce 4-bits using an S box.
+/// Реализация S-блоков
 fn s(box_id: usize, block: u8) -> u8 {
     const TABLES: [[[u8; 16]; 4]; 8] = [
         [
@@ -237,7 +244,7 @@ fn s(box_id: usize, block: u8) -> u8 {
 /// # Функции, используемые непосредственно в главном алгоритме DES
 /// ---------------------------------------------------------------
 
-/// Функция, выполняющая IP-перестановку (прямую и обратную)
+/// IP-перестановка (прямая и обратная)
 fn ip(message: u64, dir: Ip) -> u64 {
     const COUNT: usize = 5;
     const MASK: [u64; COUNT] = [
@@ -261,7 +268,7 @@ fn ip(message: u64, dir: Ip) -> u64 {
     result
 }
 
-/// Feistel function.
+/// Функция Фейстеля
 fn feistel(half_block: u32, subkey: u64) -> u32 {
     let expanded = e(half_block);
     let mut intermediate = expanded ^ subkey;
@@ -277,7 +284,7 @@ fn feistel(half_block: u32, subkey: u64) -> u32 {
     p(result)
 }
 
-/// Encrypt `message` using `subkeys`.
+/// Алгоритм DES
 fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
     let message_len = message.len();
     let message = message_to_u64s(message);
@@ -286,16 +293,23 @@ fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
 
     for msg in message {
         let permuted = ip(msg, Ip::Direct);
+        println!("Начальная:\t{:0>64b}\nперестановка", permuted);
         let mut li: u32 = ((permuted & 0xFFFFFFFF00000000) >> 32) as u32;
         let mut ri: u32 = ((permuted & 0x00000000FFFFFFFF)) as u32;
 
+        let mut i = 0;
+        println!("\t##--Сеть Фейстеля на {} раундов--##", subkeys.len());
         for subkey in &subkeys {
             let last_li = li;
             li = ri;
             ri = last_li ^ feistel(ri, *subkey);
+            println!("\t\tРаунд {}:\t{:0>32b} {:0>32b}", i, li, ri);
+            i += 1;
         }
+        println!("\t##--Конец сети Фейстеля--##");
 
         let r16l16 = ( ( ri as u64 ) << 32 ) | li as u64;
+        println!("Конечная:\t{:0>64b}\nперестановка", ip(r16l16, Ip::Reverse));
         blocks.push(to_u8_vec(ip(r16l16, Ip::Reverse)));
     }
 
@@ -306,24 +320,55 @@ fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
     result
 }
 
-/// Encrypt `message` using the `key`.
+/// Шифрование
 pub fn encrypt(message: &[u8], key: &Key) -> Vec<u8> {
+    println!("\n\t\t----Начало процедуры шифрования----\t\t");
     let key = key_to_u64(key);
     let subkeys = compute_subkeys(key);
-    des(message, subkeys)
+    for i in 0 .. 16 {
+        println!("Ключ {} раунда:\t{:0>64b}", i, subkeys[i]);
+    }
+    let des = des(message, subkeys);
+    println!("\t\t----Конец процедуры шифрования----\t\t");
+    des
 }
 
-/// Decrypt `message` using the `key`.
+/// Расшифрование
 pub fn decrypt(cipher: &[u8], key: &Key) -> Vec<u8> {
     let key = key_to_u64(key);
+    println!("\n\t\t----Начало процедуры расшифрования----\t\t");
     let mut subkeys = compute_subkeys(key);
     subkeys.reverse();
-    des(cipher, subkeys)
+    let des = des(cipher, subkeys);
+    println!("\t\t----Конец процедуры расшифрования----\t\t");
+    des
+}
+
+/// Шифрование (один раунд)
+pub fn encrypt_one_round(message: &[u8], key: &Key) -> Vec<u8> {
+    let key = key_to_u64(key);
+    println!("\n\t\t----Начало процедуры шифрования----\t\t");
+    let subkeys = vec![compute_subkeys(key)[0]];
+    println!("Ключ после:\t{:0>64b}\nгенерации", subkeys[0]);
+    let des = des(message, subkeys);
+    println!("\t\t----Конец процедуры шифрования----\t\t");
+    des
+}
+
+/// Расшифрование (один раунд)
+pub fn decrypt_one_round(cipher: &[u8], key: &Key) -> Vec<u8> {
+    let key = key_to_u64(key);
+    println!("\n\t\t----Начало процедуры расшифрования----\t\t");
+    let mut subkeys = vec![compute_subkeys(key)[0]];
+    subkeys.reverse();
+    let des = des(cipher, subkeys);
+    println!("\t\t----Конец процедуры расшифрования----\t\t");
+    des
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decrypt, encrypt};
+    use super::{decrypt, encrypt, decrypt_one_round, encrypt_one_round};
     use super::{e, p, pc1, pc2};
 
     #[test]
@@ -371,11 +416,27 @@ mod tests {
     }
 
     #[test]
+    fn test_one_round() {
+        let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+        let message = [0x52, 0x75, 0x73, 0x74, 0x20, 0x44, 0x45, 0x53];
+        println!("Ключ:\t\t{:0>64b}", super::key_to_u64(&key));
+        println!("Открытый текст:\t{:0>64b}", super::message_to_u64s(&message)[0]);
+
+        let message_enc = encrypt_one_round(&message, &key);
+        let message_dec = decrypt_one_round(&message_enc, &key);
+        assert_eq!(message_dec, message);
+        println!("Открытый текст:\t\t{}\nРасширфованный текст:\t{}",
+                    String::from_utf8_lossy(&message),
+                    String::from_utf8_lossy(&message_dec))
+    }
+
+    #[test]
     fn test_encrypt_decrypt() {
         let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
+        println!("Ключ:\t\t{:0>64b}", super::key_to_u64(&key));
 
-        let message = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
-        let expected_cipher = vec![0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05];
+        let message = [0x52, 0x75, 0x73, 0x74, 0x20, 0x44, 0x45, 0x53];
+        let expected_cipher = vec![0x27, 0xC1, 0x4F, 0xA6, 0x9A, 0x04, 0x4E, 0x28];
         let cipher = encrypt(&message, &key);
         assert_eq!(cipher, expected_cipher);
 
@@ -384,14 +445,34 @@ mod tests {
         let message = decrypt(&cipher, &key);
         assert_eq!(message, expected_message);
 
-        let message = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
-        let expected_cipher = vec![0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05, 0x85, 0xE8, 0x13, 0x54, 0x0F, 0x0A, 0xB4, 0x05];
+        println!("Открытый текст:\t\t{}", String::from_utf8_lossy(&expected_message));
+        println!("Расширфованный текст:\t{}", String::from_utf8_lossy(&message));
+
+        let message = [0x64, 0x65, 0x73, 0x2D, 0x72, 0x73, 0x2D, 0x6B,
+            0x72, 0x61, 0x75, 0x74, 0x63, 0x61, 0x74, 0x20,
+            0x69, 0x73, 0x20, 0x6D, 0x79, 0x20, 0x69, 0x6D,
+            0x70, 0x6C, 0x65, 0x6D, 0x65, 0x6E, 0x74, 0x61,
+            0x74, 0x69, 0x6F, 0x6E, 0x20, 0x6F, 0x66, 0x20,
+            0x44, 0x45, 0x53, 0x20, 0x61, 0x6C, 0x67, 0x6F,
+            0x72, 0x69, 0x74, 0x68, 0x6D, 0x20, 0x69, 0x6E,
+            0x20, 0x52, 0x75, 0x73, 0x74];
+        let expected_cipher = vec![0x82, 0x8D, 0xB8, 0xD5, 0xFF, 0x41, 0xDF, 0xF7,
+            0x91, 0x34, 0xCC, 0x88, 0xFB, 0x52, 0xCB, 0xB7,
+            0x3C, 0x30, 0x17, 0x36, 0x9C, 0x3A, 0x70, 0xE0,
+            0x17, 0x64, 0x25, 0xDB, 0x17, 0xF5, 0x10, 0x80,
+            0x02, 0xAF, 0x08, 0x04, 0x6F, 0x3A, 0xA9, 0xB1,
+            0x3D, 0x74, 0x5C, 0xA7, 0x05, 0x8A, 0x13, 0x46,
+            0xB8, 0x0B, 0x5C, 0x9C, 0xE6, 0x01, 0x76, 0x92,
+            0x1C, 0x42, 0x30, 0x7E, 0xB6, 0xFA, 0xE4, 0xD3];
         let cipher = encrypt(&message, &key);
         assert_eq!(cipher, expected_cipher);
 
         let cipher = expected_cipher;
         let expected_message = message;
         let message = decrypt(&cipher, &key);
-        assert_eq!(message, expected_message);
+        assert_eq!(&message[..expected_message.len()], &expected_message[..]);
+
+        println!("Открытый текст:\t\t{}", String::from_utf8_lossy(&expected_message));
+        println!("Расширфованный текст:\t{}", String::from_utf8_lossy(&message));
     }
 }
