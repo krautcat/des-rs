@@ -293,23 +293,18 @@ fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
 
     for msg in message {
         let permuted = ip(msg, Ip::Direct);
-        println!("Начальная:\t{:0>64b}\nперестановка", permuted);
         let mut li: u32 = ((permuted & 0xFFFFFFFF00000000) >> 32) as u32;
         let mut ri: u32 = ((permuted & 0x00000000FFFFFFFF)) as u32;
 
         let mut i = 0;
-        println!("\t##--Сеть Фейстеля на {} раундов--##", subkeys.len());
         for subkey in &subkeys {
             let last_li = li;
             li = ri;
             ri = last_li ^ feistel(ri, *subkey);
-            println!("\t\tРаунд {}:\t{:0>32b} {:0>32b}", i, li, ri);
             i += 1;
         }
-        println!("\t##--Конец сети Фейстеля--##");
 
         let r16l16 = ( ( ri as u64 ) << 32 ) | li as u64;
-        println!("Конечная:\t{:0>64b}\nперестановка", ip(r16l16, Ip::Reverse));
         blocks.push(to_u8_vec(ip(r16l16, Ip::Reverse)));
     }
 
@@ -322,53 +317,22 @@ fn des(message: &[u8], subkeys: Vec<u64>) -> Vec<u8> {
 
 /// Шифрование
 pub fn encrypt(message: &[u8], key: &Key) -> Vec<u8> {
-    println!("\n\t\t----Начало процедуры шифрования----\t\t");
     let key = key_to_u64(key);
     let subkeys = compute_subkeys(key);
-    for i in 0 .. 16 {
-        println!("Ключ {} раунда:\t{:0>64b}", i, subkeys[i]);
-    }
-    let des = des(message, subkeys);
-    println!("\t\t----Конец процедуры шифрования----\t\t");
-    des
+    des(message, subkeys)
 }
 
 /// Расшифрование
 pub fn decrypt(cipher: &[u8], key: &Key) -> Vec<u8> {
     let key = key_to_u64(key);
-    println!("\n\t\t----Начало процедуры расшифрования----\t\t");
     let mut subkeys = compute_subkeys(key);
     subkeys.reverse();
-    let des = des(cipher, subkeys);
-    println!("\t\t----Конец процедуры расшифрования----\t\t");
-    des
-}
-
-/// Шифрование (один раунд)
-pub fn encrypt_one_round(message: &[u8], key: &Key) -> Vec<u8> {
-    let key = key_to_u64(key);
-    println!("\n\t\t----Начало процедуры шифрования----\t\t");
-    let subkeys = vec![compute_subkeys(key)[0]];
-    println!("Ключ после:\t{:0>64b}\nгенерации", subkeys[0]);
-    let des = des(message, subkeys);
-    println!("\t\t----Конец процедуры шифрования----\t\t");
-    des
-}
-
-/// Расшифрование (один раунд)
-pub fn decrypt_one_round(cipher: &[u8], key: &Key) -> Vec<u8> {
-    let key = key_to_u64(key);
-    println!("\n\t\t----Начало процедуры расшифрования----\t\t");
-    let mut subkeys = vec![compute_subkeys(key)[0]];
-    subkeys.reverse();
-    let des = des(cipher, subkeys);
-    println!("\t\t----Конец процедуры расшифрования----\t\t");
-    des
+    des(cipher, subkeys)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{decrypt, encrypt, decrypt_one_round, encrypt_one_round};
+    use super::{decrypt, encrypt};
     use super::{e, p, pc1, pc2};
 
     #[test]
@@ -416,24 +380,8 @@ mod tests {
     }
 
     #[test]
-    fn test_one_round() {
-        let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
-        let message = [0x52, 0x75, 0x73, 0x74, 0x20, 0x44, 0x45, 0x53];
-        println!("Ключ:\t\t{:0>64b}", super::key_to_u64(&key));
-        println!("Открытый текст:\t{:0>64b}", super::message_to_u64s(&message)[0]);
-
-        let message_enc = encrypt_one_round(&message, &key);
-        let message_dec = decrypt_one_round(&message_enc, &key);
-        assert_eq!(message_dec, message);
-        println!("Открытый текст:\t\t{}\nРасширфованный текст:\t{}",
-                    String::from_utf8_lossy(&message),
-                    String::from_utf8_lossy(&message_dec))
-    }
-
-    #[test]
     fn test_encrypt_decrypt() {
         let key = [0x13, 0x34, 0x57, 0x79, 0x9B, 0xBC, 0xDF, 0xF1];
-        println!("Ключ:\t\t{:0>64b}", super::key_to_u64(&key));
 
         let message = [0x52, 0x75, 0x73, 0x74, 0x20, 0x44, 0x45, 0x53];
         let expected_cipher = vec![0x27, 0xC1, 0x4F, 0xA6, 0x9A, 0x04, 0x4E, 0x28];
@@ -444,9 +392,6 @@ mod tests {
         let expected_message = message;
         let message = decrypt(&cipher, &key);
         assert_eq!(message, expected_message);
-
-        println!("Открытый текст:\t\t{}", String::from_utf8_lossy(&expected_message));
-        println!("Расширфованный текст:\t{}", String::from_utf8_lossy(&message));
 
         let message = [0x64, 0x65, 0x73, 0x2D, 0x72, 0x73, 0x2D, 0x6B,
             0x72, 0x61, 0x75, 0x74, 0x63, 0x61, 0x74, 0x20,
@@ -471,8 +416,5 @@ mod tests {
         let expected_message = message;
         let message = decrypt(&cipher, &key);
         assert_eq!(&message[..expected_message.len()], &expected_message[..]);
-
-        println!("Открытый текст:\t\t{}", String::from_utf8_lossy(&expected_message));
-        println!("Расширфованный текст:\t{}", String::from_utf8_lossy(&message));
     }
 }
